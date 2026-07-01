@@ -1,0 +1,96 @@
+name: RDP-Ubuntu
+
+on:
+  workflow_dispatch:
+
+jobs:
+  secure-rdp-ubuntu:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3600
+
+    steps:
+      - name: Update System and Install GUI & Xrdp
+        run: |
+          sudo apt-get update
+          
+          # Cài đặt giao diện XFCE4 nhẹ và các công cụ cần thiết mà không hỏi lại (-y)
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y xfce4 xfce4-goodies xorg dbus-x11 x11-xserver-utils
+          
+          # Cài đặt dịch vụ RDP (xrdp)
+          sudo apt-get install -y xrdp
+          
+          # Cấu hình để xrdp sử dụng giao diện XFCE khi có người kết nối vào
+          echo "xfce4-session" > ~/.xsession
+          
+          # Cho phép xrdp truy cập chứng chỉ hệ thống và khởi động dịch vụ
+          sudo adduser xrdp ssl-cert
+          sudo systemctl restart xrdp
+          
+          # Mở port 3389 trên tường lửa của Ubuntu (UFW)
+          sudo ufw allow 3389/tcp
+
+      - name: Create RDP User with Secure Password
+        run: |
+          # Tạo mật khẩu ngẫu nhiên có độ bảo mật cao giống bản Windows cũ
+          PASSWORD=$(date +%s | sha256sum | base64 | head -c 16)
+          
+          # Tạo user tên là "RDP", đặt thư mục home và shell mặc định
+          sudo useradd -m -s /bin/bash RDP
+          echo "RDP:$PASSWORD" | sudo chpasswd
+          
+          # Cấp quyền Admin (sudo) cho user này
+          sudo usermod -aG sudo RDP
+          
+          # Lưu thông tin vào môi trường GitHub để bước sau hiển thị
+          echo "RDP_CREDS=User: RDP | Password: $PASSWORD" >> $GITHUB_ENV
+          
+          # Ép giao diện XFCE mặc định cho riêng user RDP mới tạo này
+          echo "xfce4-session" | sudo tee /home/RDP/.xsession
+          sudo chown RDP:RDP /home/RDP/.xsession
+
+      - name: Install Tailscale
+        run: |
+          # Tải và cài đặt tự động Tailscale cho Linux
+          curl -fsSL https://tailscale.com/install.sh | sh
+
+      - name: Establish Tailscale Connection
+        run: |
+          # Khởi động Tailscale bằng Auth Key lấy từ Secrets
+          sudo tailscale up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=gh-ubuntu-runner-$GITHUB_RUN_ID
+          
+          # Chờ lấy địa chỉ IP Tailscaleassigned
+          TS_IP=""
+          RETRIES=0
+          while [ -z "$TS_IP" ] && [ $RETRIES -lt 10 ]; do
+              TS_IP=$(tailscale ip -4)
+              sleep 5
+              RETRIES=$((RETRIES+1))
+          done
+          
+          if [ -z "$TS_IP" ]; then
+              echo "Không lấy được IP Tailscale. Thoát."
+              exit 1
+          fi
+          echo "TAILSCALE_IP=$TS_IP" >> $GITHUB_ENV
+      
+      - name: Verify RDP Accessibility
+        run: |
+          echo "Tailscale IP: $TAILSCALE_IP"
+          
+          # Kiểm tra xem port 3389 trên giao diện Tailscale đã mở chưa
+          nc -zv localhost 3389 || exit 1
+          echo "Kết nối nội bộ đến cổng RDP thành công!"
+
+      - name: Maintain Connection
+        run: |
+          echo -e "\n=== RDP UBUNTU ACCESS ==="
+          echo "Address: $TAILSCALE_IP"
+          echo "Username: RDP"
+          echo "${{ env.RDP_CREDS }}"
+          echo -e "=========================\n"
+          
+          # Vòng lặp duy trì máy ảo chạy liên tục
+          while true; do
+              echo "[$(date)] RDP Active - Nhấn Ctrl+C trong workflow để dừng máy"
+              sleep 300
+          done
