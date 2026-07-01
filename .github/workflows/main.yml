@@ -9,7 +9,7 @@ jobs:
     timeout-minutes: 3600
 
     steps:
-     - name: Update System and Install GUI & Xrdp
+      - name: Update System and Install GUI & Xrdp
         run: |
           sudo apt-get update
           
