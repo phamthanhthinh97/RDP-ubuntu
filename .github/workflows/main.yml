@@ -13,46 +13,46 @@ jobs:
         run: |
           sudo apt-get update
           
-          # Cài đặt giao diện XFCE4 nhẹ và các công cụ cần thiết mà không hỏi lại (-y)
+          # Cài đặt giao diện XFCE4 nhẹ và các công cụ cần thiết
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y xfce4 xfce4-goodies xorg dbus-x11 x11-xserver-utils
           
           # Cài đặt dịch vụ RDP (xrdp)
           sudo apt-get install -y xrdp
           
-          # Cấu hình để xrdp sử dụng giao diện XFCE khi có người kết nối vào
-          echo "xfce4-session" > ~/.xsession
+          # FIX QUYỀN XSERVER: Cho phép tất cả user chạy giao diện đồ họa
+          sudo sed -i 's/allowed_users=console/allowed_users=anybody/g' /etc/X11/Xwrapper.config
           
           # Cho phép xrdp truy cập chứng chỉ hệ thống và khởi động dịch vụ
           sudo adduser xrdp ssl-cert
           sudo systemctl restart xrdp
           
-          # Mở port 3389 trên tường lửa của Ubuntu (UFW)
+          # Mở port 3389 trên tường lửa
           sudo ufw allow 3389/tcp
 
       - name: Create RDP User with Secure Password
         run: |
-          # Tạo mật khẩu ngẫu nhiên có độ bảo mật cao giống bản Windows cũ
+          # Tạo mật khẩu ngẫu nhiên
           PASSWORD=$(date +%s | sha256sum | base64 | head -c 16)
           
-          # Tạo user tên là "RDP", đặt thư mục home và shell mặc định
+          # Tạo user "RDP"
           sudo useradd -m -s /bin/bash RDP
           echo "RDP:$PASSWORD" | sudo chpasswd
           
-          # Cấp quyền Admin (sudo) cho user này
+          # Cấp quyền Admin (sudo)
           sudo usermod -aG sudo RDP
           
-          # Lưu thông tin vào môi trường GitHub để bước sau hiển thị
+          # Lưu thông tin vào môi trường GitHub để hiển thị
           echo "RDP_CREDS=User: RDP | Password: $PASSWORD" >> $GITHUB_ENV
           
-          # CẤU HÌNH FIX LỖI "Unable to load a failsafe session"
-          # Lệnh này giúp làm sạch các biến D-Bus cũ trước khi kích hoạt XFCE
+          # CẤU HÌNH .xsession TRIỆT ĐỂ CHO USER RDP
           sudo tee /home/RDP/.xsession << 'EOF'
           unset DBUS_SESSION_BUS_ADDRESS
           unset XDG_RUNTIME_DIR
-          startxfce4
+          . /etc/X11/Xsession
           EOF
           
-          sudo chown RDP:RDP /home/RDP/.xsession
+          # Đảm bảo user RDP làm chủ hoàn toàn thư mục cá nhân của mình
+          sudo chown -R RDP:RDP /home/RDP/
 
       - name: Install Tailscale
         run: |
