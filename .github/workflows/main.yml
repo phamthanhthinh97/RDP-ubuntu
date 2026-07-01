@@ -44,8 +44,14 @@ jobs:
           # Lưu thông tin vào môi trường GitHub để bước sau hiển thị
           echo "RDP_CREDS=User: RDP | Password: $PASSWORD" >> $GITHUB_ENV
           
-          # Ép giao diện XFCE mặc định cho riêng user RDP mới tạo này
-          echo "xfce4-session" | sudo tee /home/RDP/.xsession
+          # CẤU HÌNH FIX LỖI "Unable to load a failsafe session"
+          # Lệnh này giúp làm sạch các biến D-Bus cũ trước khi kích hoạt XFCE
+          sudo tee /home/RDP/.xsession << 'EOF'
+          unset DBUS_SESSION_BUS_ADDRESS
+          unset XDG_RUNTIME_DIR
+          startxfce4
+          EOF
+          
           sudo chown RDP:RDP /home/RDP/.xsession
 
       - name: Install Tailscale
