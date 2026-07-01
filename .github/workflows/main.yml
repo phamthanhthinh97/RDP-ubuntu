@@ -9,7 +9,7 @@ jobs:
     timeout-minutes: 3600
 
     steps:
-      - name: Update System and Install GUI & Xrdp
+     - name: Update System and Install GUI & Xrdp
         run: |
           sudo apt-get update
           
@@ -22,7 +22,16 @@ jobs:
           # FIX QUYỀN XSERVER: Cho phép tất cả user chạy giao diện đồ họa
           sudo sed -i 's/allowed_users=console/allowed_users=anybody/g' /etc/X11/Xwrapper.config
           
-          # Cho phép xrdp truy cập chứng chỉ hệ thống và khởi động dịch vụ
+          # FIX LỖI MÀN HÌNH ĐEN: Cấu hình startwm.sh của xrdp để chạy thẳng Xfce
+          # Lệnh này sẽ chèn các lệnh xóa biến môi trường kẹt và gọi xfce4-session vào đầu script startwm.sh
+          sudo sed -i '1,unset DBUS_SESSION_BUS_ADDRESS/d' /etc/xrdp/startwm.sh
+          sudo sed -i '1,unset XDG_RUNTIME_DIR/d' /etc/xrdp/startwm.sh
+          
+          sudo sed -i '2i unset DBUS_SESSION_BUS_ADDRESS' /etc/xrdp/startwm.sh
+          sudo sed -i '3i unset XDG_RUNTIME_DIR' /etc/xrdp/startwm.sh
+          sudo sed -i '4i startxfce4' /etc/xrdp/startwm.sh
+
+          # Cho phép xrdp truy cập chứng chỉ hệ thống và khởi động lại dịch vụ
           sudo adduser xrdp ssl-cert
           sudo systemctl restart xrdp
           
