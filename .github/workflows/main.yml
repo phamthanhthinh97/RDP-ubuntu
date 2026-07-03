@@ -9,17 +9,30 @@ jobs:
     timeout-minutes: 3600
 
     steps:
+      - name: Pre-configure Firefox Proxy Profile
+        run: |
+          # Tạo sẵn cấu hình ép Firefox chạy qua SOCKS5 Proxy của WARP
+          mkdir -p /tmp/firefox-profile
+          cat << 'EOF' > /tmp/firefox-profile/user.js
+          user_pref("network.proxy.type", 1);
+          user_pref("network.proxy.socks", "172.17.0.1");
+          user_pref("network.proxy.socks_port", 40000);
+          user_pref("network.proxy.socks_version", 5);
+          user_pref("network.proxy.socks_remote_dns", true);
+          EOF
+
       - name: Start Ubuntu Desktop Docker Container
         run: |
-          # Cấu hình Chrome trong Docker tự động ăn theo mạng Proxy của WARP ở máy host (172.17.0.1:40000)
-          # Thêm biến --shm-size để không bị sập tab khi load video
+          # Mount file user.js vào thư mục profile mặc định của người dùng root/ubuntu trong container
+          # Đồng thời giữ cấu hình --shm-size=2g để Firefox load video mượt mà
           docker run -d \
             --name ubuntu-desktop \
             --restart always \
             -p 80:80 \
             -p 5900:5900 \
             --shm-size=2g \
-            -e CHROMIUM_FLAGS="--proxy-server=socks5://172.17.0.1:40000" \
+            -v /tmp/firefox-profile/user.js:/root/.mozilla/firefox/desktop.default/user.js \
+            -v /tmp/firefox-profile/user.js:/home/ubuntu/.mozilla/firefox/desktop.default/user.js \
             dorowu/ubuntu-desktop-lxde-vnc
 
           sleep 5
@@ -37,21 +50,16 @@ jobs:
           sudo systemctl start warp-svc
           sleep 3
           
-          # 3. ĐĂNG KÝ VÀ CHUYỂN SANG CHẾ ĐỘ PROXY (QUAN TRỌNG)
+          # 3. Đăng ký và kết nối mạng WARP ở chế độ Proxy
           warp-cli --accept-tos registration new
-          
-          # Chuyển từ chế độ tạo Card mạng ảo sang chế độ Proxy cục bộ để không xung đột với Tailscale
           warp-cli --accept-tos mode proxy
           warp-cli --accept-tos connect
           sleep 5
           
-          # 4. Kiểm tra xem Proxy WARP hoạt động chưa bằng cách test qua cổng 40000
+          # 4. Kiểm tra hoạt động của Proxy WARP
           echo "Kiểm tra IP thông qua Proxy WARP (Cloudflare):"
           curl -x socks5://127.0.0.1:40000 -s ifconfig.me || echo "Chưa kết nối được proxy"
           echo ""
-          
-          echo "Kiểm tra IP gốc của GitHub (Vẫn giữ nguyên để Tailscale chạy):"
-          curl -s ifconfig.me
 
       - name: Install Tailscale
         run: |
@@ -59,7 +67,6 @@ jobs:
 
       - name: Establish Tailscale Connection
         run: |
-          # Giờ đây Tailscale kết nối hoàn toàn bình thường, không lo bị nghẽn mạng nữa
           sudo tailscale up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=gh-ubuntu-docker-$GITHUB_RUN_ID
           
           TS_IP=""
@@ -92,6 +99,6 @@ jobs:
           echo "=====================================\n"
           
           while true; do
-              echo "[$(date)] Toàn bộ hệ thống chạy mượt mà: Tailscale kết nối ổn định + Chrome trong Docker lướt YouTube qua WARP Proxy!"
+              echo "[$(date)] Toàn bộ hệ thống chạy mượt mà: Tailscale ổn định + Firefox chạy qua WARP Proxy!"
               sleep 300
           done
