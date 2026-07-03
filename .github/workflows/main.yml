@@ -1,4 +1,4 @@
-name: Docker-Ubuntu-Desktop-Fixed
+name: Docker-Ubuntu-Desktop
 
 on:
   workflow_dispatch:
@@ -9,57 +9,21 @@ jobs:
     timeout-minutes: 3600
 
     steps:
-      - name: Pre-configure Firefox Proxy Profile
-        run: |
-          # Tạo sẵn cấu hình ép Firefox chạy qua SOCKS5 Proxy của WARP
-          mkdir -p /tmp/firefox-profile
-          cat << 'EOF' > /tmp/firefox-profile/user.js
-          user_pref("network.proxy.type", 1);
-          user_pref("network.proxy.socks", "172.17.0.1");
-          user_pref("network.proxy.socks_port", 40000);
-          user_pref("network.proxy.socks_version", 5);
-          user_pref("network.proxy.socks_remote_dns", true);
-          EOF
-
       - name: Start Ubuntu Desktop Docker Container
         run: |
-          # Mount file user.js vào thư mục profile mặc định của người dùng root/ubuntu trong container
-          # Đồng thời giữ cấu hình --shm-size=2g để Firefox load video mượt mà
+          # Chạy container ubuntu-desktop ở chế độ nền (detached)
+          # Map port 80 để vào bằng trình duyệt, và port 5900 cho VNC client nếu cần
           docker run -d \
             --name ubuntu-desktop \
             --restart always \
             -p 80:80 \
             -p 5900:5900 \
-            --shm-size=2g \
-            -v /tmp/firefox-profile/user.js:/root/.mozilla/firefox/desktop.default/user.js \
-            -v /tmp/firefox-profile/user.js:/home/ubuntu/.mozilla/firefox/desktop.default/user.js \
+            -v /dev/shm:/dev/shm \
             dorowu/ubuntu-desktop-lxde-vnc
 
+          # Chờ vài giây để container khởi động hoàn toàn
           sleep 5
           docker ps
-
-      - name: Install and Connect Cloudflare WARP (Proxy Mode)
-        run: |
-          # 1. Cài đặt kho và gói Cloudflare WARP
-          curl -fsSL https://pkg.cloudflareclient.com/pubkey.gpg | sudo gpg --yes --dearmor --output /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg
-          echo "deb [signed-by=/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg] https://pkg.cloudflareclient.com/ $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/cloudflare-client.list
-          sudo apt-get update && sudo apt-get install cloudflare-warp -y
-          
-          # 2. Khởi động dịch vụ hệ thống
-          sudo systemctl enable warp-svc
-          sudo systemctl start warp-svc
-          sleep 3
-          
-          # 3. Đăng ký và kết nối mạng WARP ở chế độ Proxy
-          warp-cli --accept-tos registration new
-          warp-cli --accept-tos mode proxy
-          warp-cli --accept-tos connect
-          sleep 5
-          
-          # 4. Kiểm tra hoạt động của Proxy WARP
-          echo "Kiểm tra IP thông qua Proxy WARP (Cloudflare):"
-          curl -x socks5://127.0.0.1:40000 -s ifconfig.me || echo "Chưa kết nối được proxy"
-          echo ""
 
       - name: Install Tailscale
         run: |
@@ -85,6 +49,7 @@ jobs:
       
       - name: Verify Web GUI Accessibility
         run: |
+          # Kiểm tra xem port 80 (HTTP) đã sẵn sàng chưa
           nc -zv localhost 80 || exit 1
           echo "Kết nối nội bộ đến cổng Web GUI thành công!"
 
@@ -98,7 +63,8 @@ jobs:
           echo "👉 $TAILSCALE_IP:5900"
           echo "=====================================\n"
           
+          # Vòng lặp duy trì workflow
           while true; do
-              echo "[$(date)] Toàn bộ hệ thống chạy mượt mà: Tailscale ổn định + Firefox chạy qua WARP Proxy!"
+              echo "[$(date)] Docker Desktop Active - Đang chạy an toàn qua Tailscale..."
               sleep 300
           done
