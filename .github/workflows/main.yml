@@ -11,20 +11,44 @@ jobs:
     steps:
       - name: Start Ubuntu Desktop Docker Container
         run: |
-          # Chạy container ubuntu-desktop ở chế độ nền (detached)
-          # Map port 80 để vào bằng trình duyệt, và port 5900 cho VNC client nếu cần
+          # Khởi chạy container với cấu hình bộ nhớ đệm tăng lên để tránh sập tab Chrome khi xem video
           docker run -d \
             --name ubuntu-desktop \
             --restart always \
             -p 80:80 \
             -p 5900:5900 \
-            -v /dev/shm:/dev/shm \
+            --shm-size=2g \
+            --device /dev/snd \
             dorowu/ubuntu-desktop-lxde-vnc
 
-          # Chờ vài giây để container khởi động hoàn toàn
           sleep 5
           docker ps
 
+      # =========================================================================
+      # VỊ TRÍ DÁN: ĐẶT NGAY TẠI ĐÂY (SAU KHI CHẠY DOCKER & TRƯỚC KHI CÀI TAILSCALE)
+      # =========================================================================
+      - name: Install and Connect Cloudflare WARP
+        run: |
+          # Cài đặt kho lưu trữ của Cloudflare
+          curl -fsSL https://pkg.cloudflareclient.com/pubkey.gpg | sudo gpg --yes --dearmor --output /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg
+          echo "deb [signed-by=/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg] https://pkg.cloudflareclient.com/ $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/cloudflare-client.list
+          
+          # Cài đặt warp-cli
+          sudo apt-get update && sudo apt-get install cloudflare-warp -y
+          
+          # Đăng ký và kết nối mạng WARP để lấy IP sạch của Cloudflare nhằm "vượt rào" YouTube
+          warp-cli --accept-tos registration new
+          warp-cli --accept-tos mode warp
+          warp-cli --accept-tos connect
+          
+          # Kiểm tra xem IP của máy ảo đã đổi sang dải IP của Cloudflare chưa
+          echo "IP hiện tại của GitHub Runner sau khi bật WARP:"
+          curl ifconfig.me
+          echo ""
+
+      # =========================================================================
+      # CÁC BƯỚC CÒN LẠI GIỮ NGUYÊN
+      # =========================================================================
       - name: Install Tailscale
         run: |
           curl -fsSL https://tailscale.com/install.sh | sh
@@ -49,7 +73,6 @@ jobs:
       
       - name: Verify Web GUI Accessibility
         run: |
-          # Kiểm tra xem port 80 (HTTP) đã sẵn sàng chưa
           nc -zv localhost 80 || exit 1
           echo "Kết nối nội bộ đến cổng Web GUI thành công!"
 
@@ -63,8 +86,7 @@ jobs:
           echo "👉 $TAILSCALE_IP:5900"
           echo "=====================================\n"
           
-          # Vòng lặp duy trì workflow
           while true; do
-              echo "[$(date)] Docker Desktop Active - Đang chạy an toàn qua Tailscale..."
+              echo "[$(date)] Docker Desktop Active - YouTube đã sẵn sàng qua Cloudflare WARP..."
               sleep 300
           done
