@@ -1,4 +1,4 @@
-name: Docker-Ubuntu-Desktop
+name: Docker-Ubuntu-Desktop-Fixed
 
 on:
   workflow_dispatch:
@@ -11,65 +11,55 @@ jobs:
     steps:
       - name: Start Ubuntu Desktop Docker Container
         run: |
-          # Khởi chạy container với cấu hình bộ nhớ đệm tăng lên để tránh sập tab Chrome khi xem video
+          # Cấu hình Chrome trong Docker tự động ăn theo mạng Proxy của WARP ở máy host (172.17.0.1:40000)
+          # Thêm biến --shm-size để không bị sập tab khi load video
           docker run -d \
             --name ubuntu-desktop \
             --restart always \
             -p 80:80 \
             -p 5900:5900 \
             --shm-size=2g \
+            -e CHROMIUM_FLAGS="--proxy-server=socks5://172.17.0.1:40000" \
             dorowu/ubuntu-desktop-lxde-vnc
 
           sleep 5
           docker ps
 
-      # =========================================================================
-      # VỊ TRÍ DÁN: ĐẶT NGAY TẠI ĐÂY (SAU KHI CHẠY DOCKER & TRƯỚC KHI CÀI TAILSCALE)
-      # =========================================================================
-      - name: Install and Connect Cloudflare WARP
+      - name: Install and Connect Cloudflare WARP (Proxy Mode)
         run: |
-          # 1. Cài đặt kho lưu trữ của Cloudflare
+          # 1. Cài đặt kho và gói Cloudflare WARP
           curl -fsSL https://pkg.cloudflareclient.com/pubkey.gpg | sudo gpg --yes --dearmor --output /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg
           echo "deb [signed-by=/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg] https://pkg.cloudflareclient.com/ $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/cloudflare-client.list
-          
-          # 2. Cài đặt warp-cli
           sudo apt-get update && sudo apt-get install cloudflare-warp -y
           
-          # 3. FIX LỖI KẾT NỐI: Ép dịch vụ warp-svc khởi động thủ công bằng systemctl
-          echo "Đang kích hoạt và khởi động dịch vụ WARP..."
+          # 2. Khởi động dịch vụ hệ thống
           sudo systemctl enable warp-svc
           sudo systemctl start warp-svc
-          
-          # Chờ 3 giây để dịch vụ khởi động hoàn toàn ổn định trong nền
           sleep 3
           
-          # Kiểm tra trạng thái xem dịch vụ đã chạy chưa (Active: active (running))
-          sudo systemctl status warp-svc --no-pager || true
-          
-          # 4. Đăng ký và kết nối mạng WARP
-          echo "Đang thiết lập kết nối WARP..."
+          # 3. ĐĂNG KÝ VÀ CHUYỂN SANG CHẾ ĐỘ PROXY (QUAN TRỌNG)
           warp-cli --accept-tos registration new
-          warp-cli --accept-tos mode warp
-          warp-cli --accept-tos connect
           
-          # Chờ thêm vài giây để WARP thiết lập đường hầm VPN thành công
+          # Chuyển từ chế độ tạo Card mạng ảo sang chế độ Proxy cục bộ để không xung đột với Tailscale
+          warp-cli --accept-tos mode proxy
+          warp-cli --accept-tos connect
           sleep 5
           
-          # 5. Kiểm tra kết nối và hiển thị IP mới
-          echo "IP hiện tại của GitHub Runner sau khi bật WARP thành công:"
-          curl -s ifconfig.me || echo "Không lấy được IP công khai, nhưng kiểm tra status:"
+          # 4. Kiểm tra xem Proxy WARP hoạt động chưa bằng cách test qua cổng 40000
+          echo "Kiểm tra IP thông qua Proxy WARP (Cloudflare):"
+          curl -x socks5://127.0.0.1:40000 -s ifconfig.me || echo "Chưa kết nối được proxy"
           echo ""
-          warp-cli --accept-tos status
+          
+          echo "Kiểm tra IP gốc của GitHub (Vẫn giữ nguyên để Tailscale chạy):"
+          curl -s ifconfig.me
 
-      # =========================================================================
-      # CÁC BƯỚC CÒN LẠI GIỮ NGUYÊN
-      # =========================================================================
       - name: Install Tailscale
         run: |
           curl -fsSL https://tailscale.com/install.sh | sh
 
       - name: Establish Tailscale Connection
         run: |
+          # Giờ đây Tailscale kết nối hoàn toàn bình thường, không lo bị nghẽn mạng nữa
           sudo tailscale up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=gh-ubuntu-docker-$GITHUB_RUN_ID
           
           TS_IP=""
@@ -102,6 +92,6 @@ jobs:
           echo "=====================================\n"
           
           while true; do
-              echo "[$(date)] Docker Desktop Active - YouTube đã sẵn sàng qua Cloudflare WARP..."
+              echo "[$(date)] Toàn bộ hệ thống chạy mượt mà: Tailscale kết nối ổn định + Chrome trong Docker lướt YouTube qua WARP Proxy!"
               sleep 300
           done
