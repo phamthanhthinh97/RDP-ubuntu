@@ -1,79 +1,38 @@
-name: RDP-Ubuntu
+name: Docker-Ubuntu-Desktop
 
 on:
   workflow_dispatch:
 
 jobs:
-  secure-rdp-ubuntu:
+  run-desktop-container:
     runs-on: ubuntu-latest
     timeout-minutes: 3600
 
     steps:
-      - name: Update System and Install GUI & Xrdp
+      - name: Start Ubuntu Desktop Docker Container
         run: |
-          sudo apt-get update
-          
-          # Cài đặt giao diện XFCE4 nhẹ và các công cụ cần thiết
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y xfce4 xfce4-goodies xorg dbus-x11 x11-xserver-utils
-          
-          # Cài đặt dịch vụ RDP (xrdp)
-          sudo apt-get install -y xrdp
-          
-          # FIX QUYỀN XSERVER: Cho phép tất cả user chạy giao diện đồ họa
-          sudo sed -i 's/allowed_users=console/allowed_users=anybody/g' /etc/X11/Xwrapper.config
-          
-          # FIX LỖI MÀN HÌNH ĐEN: Cấu hình startwm.sh của xrdp để chạy thẳng Xfce
-          # Lệnh này sẽ chèn các lệnh xóa biến môi trường kẹt và gọi xfce4-session vào đầu script startwm.sh
-          sudo sed -i '1,unset DBUS_SESSION_BUS_ADDRESS/d' /etc/xrdp/startwm.sh
-          sudo sed -i '1,unset XDG_RUNTIME_DIR/d' /etc/xrdp/startwm.sh
-          
-          sudo sed -i '2i unset DBUS_SESSION_BUS_ADDRESS' /etc/xrdp/startwm.sh
-          sudo sed -i '3i unset XDG_RUNTIME_DIR' /etc/xrdp/startwm.sh
-          sudo sed -i '4i startxfce4' /etc/xrdp/startwm.sh
+          # Chạy container ubuntu-desktop ở chế độ nền (detached)
+          # Map port 80 để vào bằng trình duyệt, và port 5900 cho VNC client nếu cần
+          docker run -d \
+            --name ubuntu-desktop \
+            --restart always \
+            -p 80:80 \
+            -p 5900:5900 \
+            -v /dev/shm:/dev/shm \
+            dorowu/ubuntu-desktop-lxde-vnc
 
-          # Cho phép xrdp truy cập chứng chỉ hệ thống và khởi động lại dịch vụ
-          sudo adduser xrdp ssl-cert
-          sudo systemctl restart xrdp
-          
-          # Mở port 3389 trên tường lửa
-          sudo ufw allow 3389/tcp
-
-      - name: Create RDP User with Secure Password
-        run: |
-          # Tạo mật khẩu ngẫu nhiên
-          PASSWORD=$(date +%s | sha256sum | base64 | head -c 16)
-          
-          # Tạo user "RDP"
-          sudo useradd -m -s /bin/bash RDP
-          echo "RDP:$PASSWORD" | sudo chpasswd
-          
-          # Cấp quyền Admin (sudo)
-          sudo usermod -aG sudo RDP
-          
-          # Lưu thông tin vào môi trường GitHub để hiển thị
-          echo "RDP_CREDS=User: RDP | Password: $PASSWORD" >> $GITHUB_ENV
-          
-          # CẤU HÌNH .xsession TRIỆT ĐỂ CHO USER RDP
-          sudo tee /home/RDP/.xsession << 'EOF'
-          unset DBUS_SESSION_BUS_ADDRESS
-          unset XDG_RUNTIME_DIR
-          . /etc/X11/Xsession
-          EOF
-          
-          # Đảm bảo user RDP làm chủ hoàn toàn thư mục cá nhân của mình
-          sudo chown -R RDP:RDP /home/RDP/
+          # Chờ vài giây để container khởi động hoàn toàn
+          sleep 5
+          docker ps
 
       - name: Install Tailscale
         run: |
-          # Tải và cài đặt tự động Tailscale cho Linux
           curl -fsSL https://tailscale.com/install.sh | sh
 
       - name: Establish Tailscale Connection
         run: |
-          # Khởi động Tailscale bằng Auth Key lấy từ Secrets
-          sudo tailscale up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=gh-ubuntu-runner-$GITHUB_RUN_ID
+          sudo tailscale up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=gh-ubuntu-docker-$GITHUB_RUN_ID
           
-          # Chờ lấy địa chỉ IP Tailscaleassigned
           TS_IP=""
           RETRIES=0
           while [ -z "$TS_IP" ] && [ $RETRIES -lt 10 ]; do
@@ -88,24 +47,24 @@ jobs:
           fi
           echo "TAILSCALE_IP=$TS_IP" >> $GITHUB_ENV
       
-      - name: Verify RDP Accessibility
+      - name: Verify Web GUI Accessibility
         run: |
-          echo "Tailscale IP: $TAILSCALE_IP"
-          
-          # Kiểm tra xem port 3389 trên giao diện Tailscale đã mở chưa
-          nc -zv localhost 3389 || exit 1
-          echo "Kết nối nội bộ đến cổng RDP thành công!"
+          # Kiểm tra xem port 80 (HTTP) đã sẵn sàng chưa
+          nc -zv localhost 80 || exit 1
+          echo "Kết nối nội bộ đến cổng Web GUI thành công!"
 
-      - name: Maintain Connection
+      - name: Maintain Connection & Output Link
         run: |
-          echo -e "\n=== RDP UBUNTU ACCESS ==="
-          echo "Address: $TAILSCALE_IP"
-          echo "Username: RDP"
-          echo "${{ env.RDP_CREDS }}"
-          echo -e "=========================\n"
+          echo -e "\n=== UBUNTU DESKTOP DOCKER ACCESS ==="
+          echo "Cách 1: Mở trình duyệt và truy cập đường dẫn sau:"
+          echo "👉 http://$TAILSCALE_IP"
+          echo ""
+          echo "Cách 2: Sử dụng phần mềm VNC Viewer kết nối tới:"
+          echo "👉 $TAILSCALE_IP:5900"
+          echo "=====================================\n"
           
-          # Vòng lặp duy trì máy ảo chạy liên tục
+          # Vòng lặp duy trì workflow
           while true; do
-              echo "[$(date)] RDP Active - Nhấn Ctrl+C trong workflow để dừng máy"
+              echo "[$(date)] Docker Desktop Active - Đang chạy an toàn qua Tailscale..."
               sleep 300
           done
